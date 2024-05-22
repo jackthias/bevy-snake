@@ -5,7 +5,6 @@ use bevy::{
 use rand::Rng;
 use std::fmt;
 use std::fmt::Formatter;
-use bevy::input::keyboard::KeyboardInput;
 
 const GRID_SIZE: f32 = 20.;
 // const X_EXTENT: f32 = 600.;
@@ -25,7 +24,7 @@ const GRID_Y_MID: u32 = GRID_Y / 2;
 
 const MOVE_TIMER_SECONDS: f32 = 0.5;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq)]
 struct GridCoord {
     i: i32, j: i32 // i = x; j = y;
 }
@@ -76,7 +75,11 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn spawn_bounds(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>) {
+fn spawn_bounds(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     let bounds = Mesh2dHandle(meshes.add(Rectangle::new(X_EXTENT + (BORDER_WIDTH * 2.), Y_EXTENT + (BORDER_WIDTH * 2.))));
     commands.spawn(MaterialMesh2dBundle {
         mesh: bounds,
@@ -94,20 +97,24 @@ fn spawn_bounds(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut ma
     });
 }
 
-fn spawn_coin(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>) {
+fn spawn_coin(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut game: ResMut<Game>,
+) {
     let circle = Mesh2dHandle(meshes.add(Circle {radius: GRID_SIZE / 2. }));
 
     let cell = random_cell();
-    println!("Spawn coin at cell {cell}");
+    game.coin.cell = cell;
     let coordinates = grid_space_to_vec(cell.i, cell.j);
-    println!("Spawn coin at real {coordinates}");
 
-    commands.spawn(MaterialMesh2dBundle {
-       mesh: circle,
+    game.coin.entity = Some(commands.spawn(MaterialMesh2dBundle {
+        mesh: circle,
         material: materials.add(Color::GOLD),
         transform: Transform::from_xyz(coordinates.x, coordinates.y, -1.),
         ..default()
-    });
+    }).id());
 }
 
 #[derive(Default)]
@@ -118,54 +125,76 @@ struct Player {
     direction: Direction
 }
 
+#[derive(Default)]
+struct Coin {
+    entity: Option<Entity>,
+    cell: GridCoord
+}
+
 #[derive(Resource, Default)]
 struct Game {
     player: Player,
+    coin: Coin,
 }
 
-fn spawn_player(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, mut game: ResMut<Game>) {
+fn spawn_player(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut game: ResMut<Game>,
+) {
     let player = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
     let coordinates = grid_space_to_vec(game.player.cell.i, game.player.cell.j);
-    game.player.entity = Some(commands.spawn((MaterialMesh2dBundle {
+    game.player.entity = Some(commands.spawn(MaterialMesh2dBundle {
         mesh: player,
         material: materials.add(Color::SEA_GREEN),
         transform: Transform::from_xyz(coordinates.x, coordinates.y, 1.),
         ..default()
-    })).id());
-    let cell = &game.player.cell;
-    println!("Starting at cell {cell}");
-    println!("Starting at real coordinates {coordinates}");
+    }).id());
 }
 
-fn move_player(mut game: ResMut<Game>, grid_delta: GridCoord, mut transforms: Query<&mut Transform>) {
-    let curr_cord = (*transforms.get_mut(game.player.entity.unwrap()).unwrap()).translation;
-    println!("Player current real {curr_cord}");
+fn move_player(
+    commands: Commands,
+    mut game: ResMut<Game>,
+    grid_delta: GridCoord,
+    mut transforms: Query<&mut Transform>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<ColorMaterial>>,
+) {
     game.player.cell = GridCoord{
         i: game.player.cell.i + grid_delta.i,
         j: game.player.cell.j + grid_delta.j
     };
-    let cell = &game.player.cell;
-    println!("Moving to cell {cell}");
-
     let coordinates = grid_space_to_vec(game.player.cell.i, game.player.cell.j);
-    println!("Moving to real {coordinates}");
 
     transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.x = coordinates.x;
     transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.y = coordinates.y;
+
+    check_player_on_coin(commands, game, meshes, materials)
 }
 
 #[derive(Resource)]
 struct MoveTimer(Timer);
 
-fn schedule_player_move(time: Res<Time>, mut timer: ResMut<MoveTimer>, mut game: ResMut<Game>, mut transforms: Query<&mut Transform>) {
+fn schedule_player_move(
+    commands: Commands, time: Res<Time>,
+    mut timer: ResMut<MoveTimer>,
+    game: ResMut<Game>,
+    transforms: Query<&mut Transform>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<ColorMaterial>>,
+) {
     if timer.0.tick(time.delta()).just_finished() {
         let direction = &game.player.direction;
         let delta = delta_from_direction(*direction);
-        move_player(game, delta, transforms);
+        move_player(commands, game, delta, transforms, meshes, materials);
     }
 }
 
-fn change_player_direction(mut commands: Commands, keyboard_input: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
+fn change_player_direction(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut game: ResMut<Game>,
+) {
     for kc in keyboard_input.get_just_pressed() {
         game.player.direction = match kc {
             KeyCode::ArrowUp => Direction::UP,
@@ -174,6 +203,25 @@ fn change_player_direction(mut commands: Commands, keyboard_input: Res<ButtonInp
             KeyCode::ArrowRight => Direction::RIGHT,
             _ => game.player.direction
         };
+    }
+}
+
+impl PartialEq for GridCoord {
+    fn eq(&self, other: &Self) -> bool {
+        return self.i == other.i && self.j == other.j;
+    }
+}
+
+fn check_player_on_coin(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<ColorMaterial>>,
+) {
+    if game.player.cell == game.coin.cell {
+        game.player.length += 1;
+        commands.entity(game.coin.entity.unwrap()).despawn_recursive();
+        spawn_coin(commands, meshes, materials, game);
     }
 }
 
