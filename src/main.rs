@@ -22,7 +22,8 @@ const GRID_HALF: f32 = GRID_SIZE / 2.;
 const GRID_X_MID: u32 = GRID_X / 2;
 const GRID_Y_MID: u32 = GRID_Y / 2;
 
-const MOVE_TIMER_SECONDS: f32 = 0.5;
+const MOVE_TIMER_SECONDS: f32 = 0.25;
+const SCORE_TEXT_TRANSLATION: Vec3 = Vec3 {x:  -595., y: 330., z: 5.};
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq)]
 struct GridCoord {
@@ -73,6 +74,20 @@ fn delta_from_direction(direction: Direction) -> GridCoord {
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
+}
+
+fn setup_scoreboard(mut commands: Commands) {
+    commands.spawn(
+        Text2dBundle {
+            text: Text::from_section("Score:", TextStyle {
+                font_size: 40.,
+                color: Color::YELLOW,
+                ..default()
+            }).with_justify(JustifyText::Left),
+            transform: Transform::from_xyz(SCORE_TEXT_TRANSLATION.x, SCORE_TEXT_TRANSLATION.y, SCORE_TEXT_TRANSLATION.z),
+            ..default()
+        },
+    );
 }
 
 fn spawn_bounds(
@@ -225,12 +240,30 @@ fn check_player_on_coin(
     }
 }
 
+fn update_scoreboard(
+    game: ResMut<Game>,
+    mut query: Query<(&mut Text, &mut Transform)>
+) {
+    let (mut text, mut transform) = query.single_mut();
+    let text_value = format!("Score: {}", game.player.length);
+    text.sections[0].value = text_value.clone();
+    let text_width = measure_text_width(&text_value);
+    transform.translation.x = text_width / 2.0 + SCORE_TEXT_TRANSLATION.x;
+}
+
+fn measure_text_width(text: &str) -> f32 {
+    // This is a simplified example. You need to actually measure the width based on the font and size.
+    // For accurate measurement, you may need to use a text renderer or font metrics.
+    let character_width = 20.0; // Assume an average character width (in pixels)
+    text.len() as f32 * character_width
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_resource::<Game>()
         .insert_resource(MoveTimer(Timer::from_seconds(MOVE_TIMER_SECONDS, TimerMode::Repeating)))
-        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player))
-        .add_systems(Update, (schedule_player_move, change_player_direction))
+        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player, setup_scoreboard))
+        .add_systems(Update, (schedule_player_move, change_player_direction, update_scoreboard))
         .run();
 }
