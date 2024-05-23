@@ -353,50 +353,51 @@ fn measure_text_width(text: &str) -> f32 {
 }
 
 fn check_player_in_bounds(
-    mut commands: Commands,
+    commands: Commands,
     game: ResMut<Game>,
-    mut next_state: ResMut<NextState<GameState>>,
+    next_state: ResMut<NextState<GameState>>,
 ) {
     if game.player.cell.i < 0 ||
         game.player.cell.j < 0 ||
         game.player.cell.i >= GRID_X as i32 ||
         game.player.cell.j >= GRID_Y as i32 {
-        next_state.set(GameState::GameOver);
-        commands.spawn(
-            Text2dBundle {
-                text: Text::from_section("Game Over!", TextStyle {
-                    font_size: 40.,
-                    color: Color::RED,
-                    ..default()
-                }).with_justify(JustifyText::Center),
-                transform: Transform::from_xyz(0., 0., 0.),
-                ..default()
-            },
-        );
+        end_game(commands, next_state);
     }
 }
 
-fn debug_setup(
+fn end_game(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let cells = [
-        GridCoord { i: 0, j: 0 },
-        GridCoord { i: 0, j: GRID_Y as i32 - 1 },
-        GridCoord { i: GRID_X as i32 - 1, j: 0 },
-        GridCoord { i: GRID_X as i32 - 1, j: GRID_Y as i32 - 1 }
-    ];
-    for cell in cells {
-        let circle = Mesh2dHandle(meshes.add(Circle { radius: GRID_SIZE / 2. }));
-        let coordinates = grid_space_to_vec(cell.i, cell.j);
 
-        commands.spawn(MaterialMesh2dBundle {
-            mesh: circle,
-            material: materials.add(Color::GOLD),
-            transform: Transform::from_xyz(coordinates.x, coordinates.y, -1.),
+    next_state.set(GameState::GameOver);
+    commands.spawn(
+        Text2dBundle {
+            text: Text::from_section("Game Over!", TextStyle {
+                font_size: 40.,
+                color: Color::RED,
+                ..default()
+            }).with_justify(JustifyText::Center),
+            transform: Transform::from_xyz(0., 0., 0.),
             ..default()
-        });
+        },
+    );
+}
+
+fn check_player_overlap_self(
+    commands: Commands,
+    next_state: ResMut<NextState<GameState>>,
+    game: ResMut<Game>,
+) {
+    let mut colliding = false;
+    for segment in &game.player.segments[1..] {
+        if segment.cell == game.player.cell {
+            colliding = true;
+            break;
+        }
+    }
+    if colliding {
+        end_game(commands, next_state);
     }
 }
 
@@ -406,8 +407,8 @@ fn main() {
         .init_resource::<Game>()
         .insert_resource(MoveTimer(Timer::from_seconds(MOVE_TIMER_SECONDS, TimerMode::Repeating)))
         .init_state::<GameState>()
-        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player, setup_scoreboard, debug_setup))
+        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player, setup_scoreboard))
         // .add_systems(Update, ())
-        .add_systems(Update, (schedule_player_move, change_player_direction, update_scoreboard, check_player_in_bounds).run_if(in_state(GameState::Playing)))
+        .add_systems(Update, (schedule_player_move, change_player_direction, update_scoreboard, check_player_in_bounds, check_player_overlap_self).run_if(in_state(GameState::Playing)))
         .run();
 }
