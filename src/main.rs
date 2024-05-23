@@ -146,10 +146,18 @@ struct Coin {
     cell: GridCoord
 }
 
+#[derive(Default, Clone, Eq, PartialEq, Debug, Hash, States)]
+enum GameState {
+    #[default]
+    Playing,
+    GameOver,
+}
+
 #[derive(Resource, Default)]
 struct Game {
     player: Player,
     coin: Coin,
+    game_state: GameState
 }
 
 fn spawn_player(
@@ -176,6 +184,7 @@ fn move_player(
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    if game.game_state != GameState::Playing { return };
     game.player.cell = GridCoord{
         i: game.player.cell.i + grid_delta.i,
         j: game.player.cell.j + grid_delta.j
@@ -244,11 +253,14 @@ fn update_scoreboard(
     game: ResMut<Game>,
     mut query: Query<(&mut Text, &mut Transform)>
 ) {
-    let (mut text, mut transform) = query.single_mut();
-    let text_value = format!("Score: {}", game.player.length);
-    text.sections[0].value = text_value.clone();
-    let text_width = measure_text_width(&text_value);
-    transform.translation.x = text_width / 2.0 + SCORE_TEXT_TRANSLATION.x;
+    for (mut text, mut transform) in query.iter_mut() {
+        if text.sections[0].value.contains("Score") {
+            let text_value = format!("Score: {}", game.player.length);
+            text.sections[0].value = text_value.clone();
+            let text_width = measure_text_width(&text_value);
+            transform.translation.x = text_width / 2.0 + SCORE_TEXT_TRANSLATION.x;
+        }
+    }
 }
 
 fn measure_text_width(text: &str) -> f32 {
@@ -258,12 +270,62 @@ fn measure_text_width(text: &str) -> f32 {
     text.len() as f32 * character_width
 }
 
+fn check_player_in_bounds(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if game.player.cell.i < 0 ||
+        game.player.cell.j < 0 ||
+        game.player.cell.i >= GRID_X as i32 ||
+        game.player.cell.j >= GRID_Y as i32 {
+        next_state.set(GameState::GameOver);
+        commands.spawn(
+            Text2dBundle {
+                text: Text::from_section("Game Over!", TextStyle {
+                    font_size: 40.,
+                    color: Color::RED,
+                    ..default()
+                }).with_justify(JustifyText::Center),
+                transform: Transform::from_xyz(0., 0., 0.),
+                ..default()
+            },
+        );
+    }
+}
+
+fn debug_setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let cells = [
+        GridCoord {i: 0, j: 0},
+        GridCoord {i: 0, j: GRID_Y as i32 - 1},
+        GridCoord {i: GRID_X as i32 - 1 , j: 0},
+        GridCoord {i: GRID_X as i32 - 1, j: GRID_Y as i32 - 1}
+    ];
+    for cell in cells {
+        let circle = Mesh2dHandle(meshes.add(Circle {radius: GRID_SIZE / 2. }));
+        let coordinates = grid_space_to_vec(cell.i, cell.j);
+
+        commands.spawn(MaterialMesh2dBundle {
+            mesh: circle,
+            material: materials.add(Color::GOLD),
+            transform: Transform::from_xyz(coordinates.x, coordinates.y, -1.),
+            ..default()
+        });
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_resource::<Game>()
         .insert_resource(MoveTimer(Timer::from_seconds(MOVE_TIMER_SECONDS, TimerMode::Repeating)))
-        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player, setup_scoreboard))
-        .add_systems(Update, (schedule_player_move, change_player_direction, update_scoreboard))
+        .init_state::<GameState>()
+        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player, setup_scoreboard, debug_setup))
+        // .add_systems(Update, ())
+        .add_systems(Update, (schedule_player_move, change_player_direction, update_scoreboard, check_player_in_bounds).run_if(in_state(GameState::Playing)))
         .run();
 }
