@@ -22,7 +22,7 @@ const GRID_HALF: f32 = GRID_SIZE / 2.;
 const GRID_X_MID: u32 = GRID_X / 2;
 const GRID_Y_MID: u32 = GRID_Y / 2;
 
-const MOVE_TIMER_SECONDS: f32 = 0.25;
+const MOVE_TIMER_SECONDS: f32 = 1. / 12.;
 const SCORE_TEXT_TRANSLATION: Vec3 = Vec3 { x: -595., y: 330., z: 5. };
 
 const PLAYER_START_LENGTH: u32 = 3;
@@ -337,7 +337,7 @@ fn update_scoreboard(
 ) {
     for (mut text, mut transform) in query.iter_mut() {
         if text.sections[0].value.contains("Score") {
-            let text_value = format!("Score: {}", game.player.length);
+            let text_value = format!("Score: {}", game.player.length - PLAYER_START_LENGTH);
             text.sections[0].value = text_value.clone();
             let text_width = measure_text_width(&text_value);
             transform.translation.x = text_width / 2.0 + SCORE_TEXT_TRANSLATION.x;
@@ -378,7 +378,7 @@ fn end_game(
                 color: Color::RED,
                 ..default()
             }).with_justify(JustifyText::Center),
-            transform: Transform::from_xyz(0., 0., 0.),
+            transform: Transform::from_xyz(0., 0., 10.),
             ..default()
         },
     );
