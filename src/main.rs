@@ -237,11 +237,21 @@ fn move_player(
     let mut old_translation = transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.clone();
     transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.x = coordinates.x;
     transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.y = coordinates.y;
+    let mut old_cell = game.player.segments[0].cell.clone();
+    let mut old_direction = game.player.segments[0].direction.clone();
+    game.player.segments[0].cell = game.player.cell.clone();
+    game.player.segments[0].direction = game.player.direction.clone();
 
-    for segment in &game.player.segments[1..] {
-        let tmp = transforms.get_mut(segment.entity.unwrap()).unwrap().translation.clone();
+    for segment in &mut game.player.segments[1..] {
+        let tmp_translation = transforms.get_mut(segment.entity.unwrap()).unwrap().translation.clone();
+        let tmp_direction = segment.direction;
+        let tmp_cell = segment.cell;
         transforms.get_mut(segment.entity.unwrap()).unwrap().translation = old_translation.clone();
-        old_translation = tmp.clone()
+        segment.direction = old_direction;
+        segment.cell = old_cell;
+        old_translation = tmp_translation.clone();
+        old_cell = tmp_cell.clone();
+        old_direction = tmp_direction.clone();
     }
 
     check_player_on_coin(commands, game, meshes, materials)
@@ -289,12 +299,34 @@ impl PartialEq for GridCoord {
 fn check_player_on_coin(
     mut commands: Commands,
     mut game: ResMut<Game>,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<ColorMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     if game.player.cell == game.coin.cell {
         game.player.length += 1;
         commands.entity(game.coin.entity.unwrap()).despawn_recursive();
+
+        let last_segment_cell = game.player.segments.last().unwrap().cell;
+        let last_segment_direction = game.player.segments.last().unwrap().direction;
+        let segment = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
+        let segment_cell = match last_segment_direction {
+            Direction::UP => GridCoord { i: last_segment_cell.i, j: last_segment_cell.j - 1 },
+            Direction::DOWN => GridCoord { i: last_segment_cell.i, j: last_segment_cell.j + 1},
+            Direction::LEFT => GridCoord { i: last_segment_cell.i + 1, j: last_segment_cell.j },
+            Direction::RIGHT => GridCoord { i: last_segment_cell.i - 1, j: last_segment_cell.j },
+        };
+        let segment_coordinates = grid_space_to_vec(segment_cell.i, segment_cell.j);
+        game.player.segments.push(Segment {
+            cell: segment_cell,
+            direction:  last_segment_direction.clone(),
+            entity: Some(commands.spawn(MaterialMesh2dBundle {
+                mesh: segment,
+                material: materials.add(Color::SEA_GREEN),
+                transform: Transform::from_xyz(segment_coordinates.x, segment_coordinates.y, 1.),
+                ..default()
+            }).id()),
+        });
+
         spawn_coin(commands, meshes, materials, game);
     }
 }
