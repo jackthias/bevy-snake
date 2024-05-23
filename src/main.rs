@@ -1,6 +1,6 @@
 use bevy::{
     prelude::*,
-    sprite::{MaterialMesh2dBundle, Mesh2dHandle}
+    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
 use rand::Rng;
 use std::fmt;
@@ -23,17 +23,22 @@ const GRID_X_MID: u32 = GRID_X / 2;
 const GRID_Y_MID: u32 = GRID_Y / 2;
 
 const MOVE_TIMER_SECONDS: f32 = 0.25;
-const SCORE_TEXT_TRANSLATION: Vec3 = Vec3 {x:  -595., y: 330., z: 5.};
+const SCORE_TEXT_TRANSLATION: Vec3 = Vec3 { x: -595., y: 330., z: 5. };
+
+const PLAYER_START_LENGTH: u32 = 3;
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq)]
 struct GridCoord {
-    i: i32, j: i32 // i = x; j = y;
+    i: i32,
+    j: i32, // i = x; j = y;
 }
+
 impl Default for GridCoord {
     fn default() -> Self {
-        return GridCoord{ i: GRID_X_MID as i32, j: GRID_Y_MID as i32 }
+        return GridCoord { i: GRID_X_MID as i32, j: GRID_Y_MID as i32 };
     }
 }
+
 impl fmt::Display for GridCoord {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.i, self.j)
@@ -43,15 +48,15 @@ impl fmt::Display for GridCoord {
 fn grid_space_to_vec(x: i32, y: i32) -> Vec2 {
     return Vec2 {
         x: (x as f32) * GRID_SIZE - X_MID + GRID_HALF,
-        y: (y as f32) * GRID_SIZE - Y_MID + GRID_HALF
-    }
+        y: (y as f32) * GRID_SIZE - Y_MID + GRID_HALF,
+    };
 }
 
 fn random_cell() -> GridCoord {
     let mut rng = rand::thread_rng();
     let i = rng.gen_range(0..GRID_X) as i32;
     let j = rng.gen_range(0..GRID_Y) as i32;
-    return GridCoord{i, j}
+    return GridCoord { i, j };
 }
 
 #[derive(Default, Copy, Clone)]
@@ -60,16 +65,16 @@ enum Direction {
     UP,
     DOWN,
     LEFT,
-    RIGHT
+    RIGHT,
 }
 
 fn delta_from_direction(direction: Direction) -> GridCoord {
     return match direction {
-        Direction::UP => GridCoord    { i:  0, j:  1 },
-        Direction::DOWN => GridCoord  { i:  0, j: -1 },
-        Direction::LEFT => GridCoord  { i: -1, j:  0 },
-        Direction::RIGHT => GridCoord { i:  1, j:  0 }
-    }
+        Direction::UP => GridCoord { i: 0, j: 1 },
+        Direction::DOWN => GridCoord { i: 0, j: -1 },
+        Direction::LEFT => GridCoord { i: -1, j: 0 },
+        Direction::RIGHT => GridCoord { i: 1, j: 0 }
+    };
 }
 
 fn setup_camera(mut commands: Commands) {
@@ -118,7 +123,7 @@ fn spawn_coin(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut game: ResMut<Game>,
 ) {
-    let circle = Mesh2dHandle(meshes.add(Circle {radius: GRID_SIZE / 2. }));
+    let circle = Mesh2dHandle(meshes.add(Circle { radius: GRID_SIZE / 2. }));
 
     let cell = random_cell();
     game.coin.cell = cell;
@@ -133,17 +138,25 @@ fn spawn_coin(
 }
 
 #[derive(Default)]
+struct Segment {
+    cell: GridCoord,
+    direction: Direction,
+    entity: Option<Entity>
+}
+
+#[derive(Default)]
 struct Player {
     entity: Option<Entity>,
     length: u32,
     cell: GridCoord,
-    direction: Direction
+    direction: Direction,
+    segments: Vec<Segment>,
 }
 
 #[derive(Default)]
 struct Coin {
     entity: Option<Entity>,
-    cell: GridCoord
+    cell: GridCoord,
 }
 
 #[derive(Default, Clone, Eq, PartialEq, Debug, Hash, States)]
@@ -157,7 +170,7 @@ enum GameState {
 struct Game {
     player: Player,
     coin: Coin,
-    game_state: GameState
+    game_state: GameState,
 }
 
 fn spawn_player(
@@ -174,6 +187,36 @@ fn spawn_player(
         transform: Transform::from_xyz(coordinates.x, coordinates.y, 1.),
         ..default()
     }).id());
+
+    game.player.length = PLAYER_START_LENGTH;
+    let mut segments = Vec::new();
+    segments.push(
+        Segment {
+        cell: game.player.cell,
+        entity: game.player.entity,
+        ..default()
+    });
+
+    for i in 1..game.player.length {
+        let cell = GridCoord {
+            i: game.player.cell.i,
+            j: game.player.cell.j - i as i32,
+        };
+        let segment = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
+        let segment_coordinates = grid_space_to_vec(cell.i, cell.j);
+        let entity  = Some(commands.spawn(MaterialMesh2dBundle {
+            mesh: segment,
+            material: materials.add(Color::SEA_GREEN),
+            transform: Transform::from_xyz(segment_coordinates.x, segment_coordinates.y, 1.),
+            ..default()
+        }).id());
+        segments.push(Segment {
+            cell,
+            entity,
+            ..default()
+        })
+    }
+    game.player.segments = segments;
 }
 
 fn move_player(
@@ -184,15 +227,22 @@ fn move_player(
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    if game.game_state != GameState::Playing { return };
-    game.player.cell = GridCoord{
+    if game.game_state != GameState::Playing { return; };
+    game.player.cell = GridCoord {
         i: game.player.cell.i + grid_delta.i,
-        j: game.player.cell.j + grid_delta.j
+        j: game.player.cell.j + grid_delta.j,
     };
     let coordinates = grid_space_to_vec(game.player.cell.i, game.player.cell.j);
 
+    let mut old_translation = transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.clone();
     transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.x = coordinates.x;
     transforms.get_mut(game.player.entity.unwrap()).unwrap().translation.y = coordinates.y;
+
+    for segment in &game.player.segments[1..] {
+        let tmp = transforms.get_mut(segment.entity.unwrap()).unwrap().translation.clone();
+        transforms.get_mut(segment.entity.unwrap()).unwrap().translation = old_translation.clone();
+        old_translation = tmp.clone()
+    }
 
     check_player_on_coin(commands, game, meshes, materials)
 }
@@ -251,7 +301,7 @@ fn check_player_on_coin(
 
 fn update_scoreboard(
     game: ResMut<Game>,
-    mut query: Query<(&mut Text, &mut Transform)>
+    mut query: Query<(&mut Text, &mut Transform)>,
 ) {
     for (mut text, mut transform) in query.iter_mut() {
         if text.sections[0].value.contains("Score") {
@@ -272,7 +322,7 @@ fn measure_text_width(text: &str) -> f32 {
 
 fn check_player_in_bounds(
     mut commands: Commands,
-    mut game: ResMut<Game>,
+    game: ResMut<Game>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if game.player.cell.i < 0 ||
@@ -300,13 +350,13 @@ fn debug_setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let cells = [
-        GridCoord {i: 0, j: 0},
-        GridCoord {i: 0, j: GRID_Y as i32 - 1},
-        GridCoord {i: GRID_X as i32 - 1 , j: 0},
-        GridCoord {i: GRID_X as i32 - 1, j: GRID_Y as i32 - 1}
+        GridCoord { i: 0, j: 0 },
+        GridCoord { i: 0, j: GRID_Y as i32 - 1 },
+        GridCoord { i: GRID_X as i32 - 1, j: 0 },
+        GridCoord { i: GRID_X as i32 - 1, j: GRID_Y as i32 - 1 }
     ];
     for cell in cells {
-        let circle = Mesh2dHandle(meshes.add(Circle {radius: GRID_SIZE / 2. }));
+        let circle = Mesh2dHandle(meshes.add(Circle { radius: GRID_SIZE / 2. }));
         let coordinates = grid_space_to_vec(cell.i, cell.j);
 
         commands.spawn(MaterialMesh2dBundle {
