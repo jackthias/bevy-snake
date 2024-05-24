@@ -211,6 +211,7 @@ fn spawn_player(
 ) {
     game.player.cell = GridCoord::default();
     game.player.segments = Vec::new();
+    game.player.direction = Direction::default();
     let player = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
     let coordinates = grid_space_to_vec(game.player.cell.i, game.player.cell.j);
     game.player.entity = Some(
