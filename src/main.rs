@@ -1,10 +1,11 @@
+use std::fmt;
+use std::fmt::Formatter;
+
 use bevy::{
     prelude::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
 use rand::Rng;
-use std::fmt;
-use std::fmt::Formatter;
 
 const GRID_SIZE: f32 = 20.;
 // const X_EXTENT: f32 = 600.;
@@ -101,20 +102,20 @@ fn spawn_bounds(
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let bounds = Mesh2dHandle(meshes.add(Rectangle::new(X_EXTENT + (BORDER_WIDTH * 2.), Y_EXTENT + (BORDER_WIDTH * 2.))));
-    commands.spawn(MaterialMesh2dBundle {
+    commands.spawn((MaterialMesh2dBundle {
         mesh: bounds,
         material: materials.add(Color::ANTIQUE_WHITE),
         transform: Transform::from_xyz(0f32, 0f32, -5.),
         ..default()
-    });
+    }, SaveOnTeardown {}));
 
     let inner_bounds = Mesh2dHandle(meshes.add(Rectangle::new(X_EXTENT, Y_EXTENT)));
-    commands.spawn(MaterialMesh2dBundle {
+    commands.spawn((MaterialMesh2dBundle {
         mesh: inner_bounds,
         material: materials.add(Color::DARK_GRAY),
         transform: Transform::from_xyz(0f32, 0f32, -4.),
         ..default()
-    });
+    }, SaveOnTeardown {}));
 }
 
 fn spawn_coin(
@@ -141,7 +142,7 @@ fn spawn_coin(
 struct Segment {
     cell: GridCoord,
     direction: Direction,
-    entity: Option<Entity>
+    entity: Option<Entity>,
 }
 
 #[derive(Default)]
@@ -179,6 +180,8 @@ fn spawn_player(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut game: ResMut<Game>,
 ) {
+    game.player.cell = GridCoord::default();
+    game.player.segments = Vec::new();
     let player = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
     let coordinates = grid_space_to_vec(game.player.cell.i, game.player.cell.j);
     game.player.entity = Some(commands.spawn(MaterialMesh2dBundle {
@@ -192,10 +195,10 @@ fn spawn_player(
     let mut segments = Vec::new();
     segments.push(
         Segment {
-        cell: game.player.cell,
-        entity: game.player.entity,
-        ..default()
-    });
+            cell: game.player.cell,
+            entity: game.player.entity,
+            ..default()
+        });
 
     for i in 1..game.player.length {
         let cell = GridCoord {
@@ -204,7 +207,7 @@ fn spawn_player(
         };
         let segment = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
         let segment_coordinates = grid_space_to_vec(cell.i, cell.j);
-        let entity  = Some(commands.spawn(MaterialMesh2dBundle {
+        let entity = Some(commands.spawn(MaterialMesh2dBundle {
             mesh: segment,
             material: materials.add(Color::SEA_GREEN),
             transform: Transform::from_xyz(segment_coordinates.x, segment_coordinates.y, 1.),
@@ -255,6 +258,7 @@ fn move_player(
     }
 
     check_player_on_coin(commands, game, meshes, materials)
+
 }
 
 #[derive(Resource)]
@@ -290,6 +294,9 @@ fn change_player_direction(
     }
 }
 
+#[derive(Component)]
+struct SaveOnTeardown();
+
 impl PartialEq for GridCoord {
     fn eq(&self, other: &Self) -> bool {
         return self.i == other.i && self.j == other.j;
@@ -311,14 +318,14 @@ fn check_player_on_coin(
         let segment = Mesh2dHandle(meshes.add(Rectangle::new(GRID_SIZE, GRID_SIZE)));
         let segment_cell = match last_segment_direction {
             Direction::UP => GridCoord { i: last_segment_cell.i, j: last_segment_cell.j - 1 },
-            Direction::DOWN => GridCoord { i: last_segment_cell.i, j: last_segment_cell.j + 1},
+            Direction::DOWN => GridCoord { i: last_segment_cell.i, j: last_segment_cell.j + 1 },
             Direction::LEFT => GridCoord { i: last_segment_cell.i + 1, j: last_segment_cell.j },
             Direction::RIGHT => GridCoord { i: last_segment_cell.i - 1, j: last_segment_cell.j },
         };
         let segment_coordinates = grid_space_to_vec(segment_cell.i, segment_cell.j);
         game.player.segments.push(Segment {
             cell: segment_cell,
-            direction:  last_segment_direction.clone(),
+            direction: last_segment_direction.clone(),
             entity: Some(commands.spawn(MaterialMesh2dBundle {
                 mesh: segment,
                 material: materials.add(Color::SEA_GREEN),
@@ -353,27 +360,34 @@ fn measure_text_width(text: &str) -> f32 {
 }
 
 fn check_player_in_bounds(
-    commands: Commands,
-    game: ResMut<Game>,
+    game: Res<Game>,
     next_state: ResMut<NextState<GameState>>,
 ) {
     if game.player.cell.i < 0 ||
         game.player.cell.j < 0 ||
         game.player.cell.i >= GRID_X as i32 ||
         game.player.cell.j >= GRID_Y as i32 {
-        end_game(commands, next_state);
+        println!("Out of bounds!");
+        end_game(next_state, game);
     }
 }
 
 fn end_game(
-    mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
+    game: Res<Game>
 ) {
-
+    println!("Ending game: {}", game.player.cell);
     next_state.set(GameState::GameOver);
+}
+
+fn show_game_over(
+    mut commands: Commands,
+    game: Res<Game>,
+) {
+    let text = format!("Game Over!\nScore: {}\nPress Space to Restart", game.player.length as i32 - PLAYER_START_LENGTH as i32);
     commands.spawn(
         Text2dBundle {
-            text: Text::from_section("Game Over!", TextStyle {
+            text: Text::from_section(text, TextStyle {
                 font_size: 40.,
                 color: Color::RED,
                 ..default()
@@ -384,10 +398,18 @@ fn end_game(
     );
 }
 
+fn check_restart_gameover(
+    mut next_state: ResMut<NextState<GameState>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        next_state.set(GameState::Playing)
+    }
+}
+
 fn check_player_overlap_self(
-    commands: Commands,
     next_state: ResMut<NextState<GameState>>,
-    game: ResMut<Game>,
+    game: Res<Game>,
 ) {
     let mut colliding = false;
     for segment in &game.player.segments[1..] {
@@ -397,7 +419,17 @@ fn check_player_overlap_self(
         }
     }
     if colliding {
-        end_game(commands, next_state);
+        println!("Overlap self!");
+        end_game(next_state, game);
+    }
+}
+
+fn teardown(
+    mut commands: Commands,
+    entities: Query<Entity, (Without<Camera>, Without<Window>, Without<SaveOnTeardown>)>,
+) {
+    for entity in &entities {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -407,8 +439,28 @@ fn main() {
         .init_resource::<Game>()
         .insert_resource(MoveTimer(Timer::from_seconds(MOVE_TIMER_SECONDS, TimerMode::Repeating)))
         .init_state::<GameState>()
-        .add_systems(Startup, (setup_camera, spawn_coin, spawn_bounds, spawn_player, setup_scoreboard))
-        // .add_systems(Update, ())
-        .add_systems(Update, (schedule_player_move, change_player_direction, update_scoreboard, check_player_in_bounds, check_player_overlap_self).run_if(in_state(GameState::Playing)))
+        .add_systems(Startup, (
+            setup_camera,
+            spawn_bounds,
+        ))
+        .add_systems(OnEnter(GameState::Playing), (
+            spawn_coin,
+            spawn_player,
+            setup_scoreboard,
+        ))
+        .add_systems(Update, (
+            check_restart_gameover.run_if(in_state(GameState::GameOver)),
+            bevy::window::close_on_esc,
+        ))
+        .add_systems(Update, (
+            schedule_player_move,
+            change_player_direction,
+            update_scoreboard,
+            check_player_in_bounds,
+            check_player_overlap_self,
+        ).run_if(in_state(GameState::Playing)))
+        .add_systems(OnExit(GameState::Playing), teardown)
+        .add_systems(OnEnter(GameState::GameOver), show_game_over)
+        .add_systems(OnExit(GameState::GameOver), teardown)
         .run();
 }
